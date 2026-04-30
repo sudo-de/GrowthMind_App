@@ -32,6 +32,12 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# Google OAuth secrets & Firebase config — never commit these
+client_secret_*.json
+google-services.json
+GoogleService-Info.plist
 
 # typescript
 *.tsbuildinfo
