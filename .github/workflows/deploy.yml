@@ -35,3 +35,6 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/growthmind-backend:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Deploy to Railway
+        run: curl -X POST "${{ secrets.RAILWAY_DEPLOY_HOOK }}"
