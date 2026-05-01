@@ -37,6 +37,4 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Deploy to Railway
-        run: npx @railway/cli@latest redeploy --service ${{ secrets.RAILWAY_SERVICE_ID }} --yes
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: curl -sX POST "${{ secrets.RAILWAY_DEPLOY_HOOK }}"
