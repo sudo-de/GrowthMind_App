@@ -2,10 +2,13 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,21 +25,28 @@ const (
 	accessTokenTTL  = 15 * time.Minute
 	refreshTokenTTL = 30 * 24 * time.Hour
 	blocklistPrefix = "blocklist:"
+	oauthStatePrefix = "oauth_state:"
 )
 
 type Service struct {
-	users            *user.Repository
-	redis            *redis.Client
-	jwtSecret        []byte
-	jwtRefreshSecret []byte
+	users              *user.Repository
+	redis              *redis.Client
+	jwtSecret          []byte
+	jwtRefreshSecret   []byte
+	googleClientID     string
+	googleClientSecret string
+	googleRedirectURI  string
 }
 
-func NewService(users *user.Repository, rdb *redis.Client, jwtSecret, jwtRefreshSecret string) *Service {
+func NewService(users *user.Repository, rdb *redis.Client, jwtSecret, jwtRefreshSecret, googleClientID, googleClientSecret, googleRedirectURI string) *Service {
 	return &Service{
-		users:            users,
-		redis:            rdb,
-		jwtSecret:        []byte(jwtSecret),
-		jwtRefreshSecret: []byte(jwtRefreshSecret),
+		users:              users,
+		redis:              rdb,
+		jwtSecret:          []byte(jwtSecret),
+		jwtRefreshSecret:   []byte(jwtRefreshSecret),
+		googleClientID:     googleClientID,
+		googleClientSecret: googleClientSecret,
+		googleRedirectURI:  googleRedirectURI,
 	}
 }
 
@@ -138,6 +148,57 @@ func (s *Service) GoogleSignIn(ctx context.Context, accessToken string) (*user.U
 	}
 	access, refresh, err := s.generateTokens(upserted.ID)
 	return upserted, access, refresh, err
+}
+
+func (s *Service) GoogleOAuthURL(ctx context.Context) (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	state := hex.EncodeToString(b)
+	if err := s.redis.Set(ctx, oauthStatePrefix+state, "1", 5*time.Minute).Err(); err != nil {
+		return "", err
+	}
+	params := url.Values{
+		"client_id":     {s.googleClientID},
+		"redirect_uri":  {s.googleRedirectURI},
+		"response_type": {"code"},
+		"scope":         {"openid email profile"},
+		"state":         {state},
+		"access_type":   {"online"},
+	}
+	return "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode(), nil
+}
+
+func (s *Service) GoogleOAuthCallback(ctx context.Context, code, state string) (*user.User, string, string, error) {
+	if _, err := s.redis.GetDel(ctx, oauthStatePrefix+state).Result(); err != nil {
+		return nil, "", "", errors.New("invalid or expired oauth state")
+	}
+	form := url.Values{
+		"code":          {code},
+		"client_id":     {s.googleClientID},
+		"client_secret": {s.googleClientSecret},
+		"redirect_uri":  {s.googleRedirectURI},
+		"grant_type":    {"authorization_code"},
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).PostForm("https://oauth2.googleapis.com/token", form)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("token exchange: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", "", errors.New("google token exchange failed")
+	}
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, "", "", err
+	}
+	if tokenResp.AccessToken == "" {
+		return nil, "", "", errors.New("empty access token from google")
+	}
+	return s.GoogleSignIn(ctx, tokenResp.AccessToken)
 }
 
 func (s *Service) AppleSignIn(ctx context.Context, identityToken, fullName string) (*user.User, string, string, error) {

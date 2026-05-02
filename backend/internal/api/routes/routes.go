@@ -13,6 +13,8 @@ func Register(rg fiber.Router, authHandler *auth.Handler, jwt *middleware.JWTMid
 	a.Post("/register", authHandler.Register)
 	a.Post("/login", authHandler.Login)
 	a.Post("/google", authHandler.GoogleSignIn)
+	a.Get("/google/initiate", authHandler.GoogleOAuthInitiate)
+	a.Get("/google/callback", authHandler.GoogleOAuthCallback)
 	a.Post("/apple", authHandler.AppleSignIn)
 	a.Post("/refresh", authHandler.RefreshToken)
 	a.Post("/logout", authHandler.Logout)

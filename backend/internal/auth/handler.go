@@ -1,6 +1,9 @@
 package auth
 
 import (
+	"fmt"
+	"net/url"
+
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -148,6 +151,32 @@ func (h *Handler) RefreshToken(c *fiber.Ctx) error {
 		"access_token":  access,
 		"refresh_token": refresh,
 	})
+}
+
+func (h *Handler) GoogleOAuthInitiate(c *fiber.Ctx) error {
+	authURL, err := h.svc.GoogleOAuthURL(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to initiate oauth"})
+	}
+	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
+}
+
+func (h *Handler) GoogleOAuthCallback(c *fiber.Ctx) error {
+	if errParam := c.Query("error"); errParam != "" {
+		return c.Redirect("growthmind://auth?error="+url.QueryEscape(errParam), fiber.StatusTemporaryRedirect)
+	}
+	code := c.Query("code")
+	state := c.Query("state")
+	if code == "" || state == "" {
+		return c.Redirect("growthmind://auth?error=missing_params", fiber.StatusTemporaryRedirect)
+	}
+	_, access, refresh, err := h.svc.GoogleOAuthCallback(c.Context(), code, state)
+	if err != nil {
+		return c.Redirect("growthmind://auth?error="+url.QueryEscape(err.Error()), fiber.StatusTemporaryRedirect)
+	}
+	deepLink := fmt.Sprintf("growthmind://auth?access_token=%s&refresh_token=%s",
+		url.QueryEscape(access), url.QueryEscape(refresh))
+	return c.Redirect(deepLink, fiber.StatusTemporaryRedirect)
 }
 
 func (h *Handler) Me(c *fiber.Ctx) error {

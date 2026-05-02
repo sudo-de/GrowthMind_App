@@ -40,7 +40,7 @@ func main() {
 	log.Println("Redis connected")
 
 	userRepo := user.NewRepository(db)
-	authSvc := auth.NewService(userRepo, rdb, cfg.JWTSecret, cfg.JWTRefreshSecret)
+	authSvc := auth.NewService(userRepo, rdb, cfg.JWTSecret, cfg.JWTRefreshSecret, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI)
 	authHandler := auth.NewHandler(authSvc)
 	jwt := middleware.NewJWTMiddleware(cfg.JWTSecret)
 

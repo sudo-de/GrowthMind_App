@@ -8,13 +8,16 @@ import (
 )
 
 type Config struct {
-	Port             string
-	APIVersion       string
-	DatabaseURL      string
-	RedisURL         string
-	JWTSecret        string
-	JWTRefreshSecret string
-	AllowOrigins     string
+	Port               string
+	APIVersion         string
+	DatabaseURL        string
+	RedisURL           string
+	JWTSecret          string
+	JWTRefreshSecret   string
+	AllowOrigins       string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURI  string
 }
 
 func Load() *Config {
@@ -22,13 +25,16 @@ func Load() *Config {
 		log.Println("No .env file found, reading from environment")
 	}
 	return &Config{
-		Port:             getEnv("PORT", ""),
-		APIVersion:       getEnv("API_VERSION", ""),
-		DatabaseURL:      getEnv("DATABASE_URL", ""),
-		RedisURL:         getEnv("REDIS_URL", ""),
-		JWTSecret:        getEnv("JWT_SECRET", "change-me-in-production"),
-		JWTRefreshSecret: getEnv("JWT_REFRESH_SECRET", "change-refresh-secret-in-production"),
-		AllowOrigins:     getEnv("ALLOW_ORIGINS", "*"),
+		Port:               getEnv("PORT", ""),
+		APIVersion:         getEnv("API_VERSION", ""),
+		DatabaseURL:        getEnv("DATABASE_URL", ""),
+		RedisURL:           getEnv("REDIS_URL", ""),
+		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production"),
+		JWTRefreshSecret:   getEnv("JWT_REFRESH_SECRET", "change-refresh-secret-in-production"),
+		AllowOrigins:       getEnv("ALLOW_ORIGINS", "*"),
+		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURI:  getEnv("GOOGLE_REDIRECT_URI", ""),
 	}
 }
 
