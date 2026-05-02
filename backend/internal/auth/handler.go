@@ -156,7 +156,7 @@ func (h *Handler) RefreshToken(c *fiber.Ctx) error {
 func (h *Handler) GoogleOAuthInitiate(c *fiber.Ctx) error {
 	authURL, err := h.svc.GoogleOAuthURL(c.Context())
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to initiate oauth"})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
 }
