@@ -72,6 +72,9 @@ func main() {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
+	// Stable OAuth callback — never changes regardless of API version
+	app.Get("/auth/google/callback", authHandler.GoogleOAuthCallback)
+
 	api := app.Group("/api")
 	routes.Register(api.Group("/"+cfg.APIVersion), authHandler, jwt)
 

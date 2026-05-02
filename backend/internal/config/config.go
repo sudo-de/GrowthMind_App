@@ -3,7 +3,6 @@ package config
 import (
 	"log"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -30,12 +29,9 @@ func Load() *Config {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, reading from environment")
 	}
-	apiVersion := getEnv("API_VERSION", "v1")
-	redirectURI := strings.ReplaceAll(getEnv("GOOGLE_REDIRECT_URI", ""), "{version}", apiVersion)
-
 	return &Config{
 		Port:               getEnv("PORT", ""),
-		APIVersion:         apiVersion,
+		APIVersion:         getEnv("API_VERSION", "v1"),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
 		RedisURL:           getEnv("REDIS_URL", ""),
 		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production"),
@@ -43,7 +39,7 @@ func Load() *Config {
 		AllowOrigins:       getEnv("ALLOW_ORIGINS", "*"),
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
-		GoogleRedirectURI:  redirectURI,
+		GoogleRedirectURI:  getEnv("GOOGLE_REDIRECT_URI", ""),
 		SMTPHost:           getEnv("SMTP_HOST", ""),
 		SMTPPort:           getEnv("SMTP_PORT", "587"),
 		SMTPUsername:       getEnv("SMTP_USERNAME", ""),
