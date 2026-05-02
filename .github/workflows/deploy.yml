@@ -36,5 +36,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy to Railway
-        run: curl -sX POST "${{ secrets.RAILWAY_DEPLOY_HOOK }}"
