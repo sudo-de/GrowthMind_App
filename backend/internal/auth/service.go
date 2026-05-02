@@ -74,11 +74,11 @@ func NewService(
 // ── OTP registration flow ─────────────────────────────────────────────────────
 
 type pendingRegistration struct {
-	Email        string `json:"email"`
-	PasswordHash string `json:"password_hash"`
-	Username     string `json:"username"`
-	OTP          string `json:"otp"`
-	Attempts     int    `json:"attempts"`
+	Email    string `json:"email"`
+	Password string `json:"password"` // plaintext; bcrypt runs at verify time to keep initiate fast
+	Username string `json:"username"`
+	OTP      string `json:"otp"`
+	Attempts int    `json:"attempts"`
 }
 
 // InitiateRegistration stores a pending registration in Redis, generates a
@@ -92,11 +92,6 @@ func (s *Service) InitiateRegistration(ctx context.Context, email, password, use
 		return "", errors.New("username already taken")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hash password: %w", err)
-	}
-
 	otp, err := generateOTP()
 	if err != nil {
 		return "", err
@@ -108,11 +103,11 @@ func (s *Service) InitiateRegistration(ctx context.Context, email, password, use
 	}
 
 	pending := pendingRegistration{
-		Email:        email,
-		PasswordHash: string(hash),
-		Username:     username,
-		OTP:          otp,
-		Attempts:     0,
+		Email:    email,
+		Password: password,
+		Username: username,
+		OTP:      otp,
+		Attempts: 0,
 	}
 	data, _ := json.Marshal(pending)
 	if err := s.redis.Set(ctx, otpKeyPrefix+sessionToken, data, otpTTL).Err(); err != nil {
@@ -158,11 +153,17 @@ func (s *Service) VerifyRegistrationOTP(ctx context.Context, sessionToken, otp s
 
 	s.redis.Del(ctx, key)
 
+	hash, err := bcrypt.GenerateFromPassword([]byte(pending.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("hash password: %w", err)
+	}
+	hashStr := string(hash)
+
 	created, err := s.users.Create(ctx, &user.User{
 		Email:        pending.Email,
 		FullName:     pending.Username,
 		Username:     pending.Username,
-		PasswordHash: &pending.PasswordHash,
+		PasswordHash: &hashStr,
 		Provider:     "email",
 	})
 	if err != nil {
