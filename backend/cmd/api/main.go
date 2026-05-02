@@ -19,6 +19,9 @@ import (
 func main() {
 	cfg := config.Load()
 
+	log.Printf("Google OAuth config — client_id set: %v, redirect_uri: %q",
+		cfg.GoogleClientID != "", cfg.GoogleRedirectURI)
+
 	// PostgreSQL
 	db, err := database.Connect(cfg.DatabaseURL)
 	if err != nil {
