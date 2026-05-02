@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"net/smtp"
 	"net/url"
 	"strings"
 	"sync"
@@ -22,10 +24,13 @@ import (
 )
 
 const (
-	accessTokenTTL  = 15 * time.Minute
-	refreshTokenTTL = 30 * 24 * time.Hour
-	blocklistPrefix = "blocklist:"
+	accessTokenTTL   = 15 * time.Minute
+	refreshTokenTTL  = 30 * 24 * time.Hour
+	blocklistPrefix  = "blocklist:"
 	oauthStatePrefix = "oauth_state:"
+	otpKeyPrefix     = "reg_pending:"
+	otpTTL           = 10 * time.Minute
+	maxOTPAttempts   = 5
 )
 
 type Service struct {
@@ -36,9 +41,20 @@ type Service struct {
 	googleClientID     string
 	googleClientSecret string
 	googleRedirectURI  string
+	smtpHost           string
+	smtpPort           string
+	smtpUsername       string
+	smtpPassword       string
+	smtpFrom           string
 }
 
-func NewService(users *user.Repository, rdb *redis.Client, jwtSecret, jwtRefreshSecret, googleClientID, googleClientSecret, googleRedirectURI string) *Service {
+func NewService(
+	users *user.Repository,
+	rdb *redis.Client,
+	jwtSecret, jwtRefreshSecret,
+	googleClientID, googleClientSecret, googleRedirectURI,
+	smtpHost, smtpPort, smtpUsername, smtpPassword, smtpFrom string,
+) *Service {
 	return &Service{
 		users:              users,
 		redis:              rdb,
@@ -47,8 +63,156 @@ func NewService(users *user.Repository, rdb *redis.Client, jwtSecret, jwtRefresh
 		googleClientID:     googleClientID,
 		googleClientSecret: googleClientSecret,
 		googleRedirectURI:  googleRedirectURI,
+		smtpHost:           smtpHost,
+		smtpPort:           smtpPort,
+		smtpUsername:       smtpUsername,
+		smtpPassword:       smtpPassword,
+		smtpFrom:           smtpFrom,
 	}
 }
+
+// ── OTP registration flow ─────────────────────────────────────────────────────
+
+type pendingRegistration struct {
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	Username     string `json:"username"`
+	OTP          string `json:"otp"`
+	Attempts     int    `json:"attempts"`
+}
+
+// InitiateRegistration stores a pending registration in Redis, generates a
+// 6-digit OTP, and sends it to the user's email. Returns a session token that
+// must be passed to VerifyRegistrationOTP.
+func (s *Service) InitiateRegistration(ctx context.Context, email, password, username string) (string, error) {
+	if existing, _ := s.users.GetByEmail(ctx, email); existing != nil {
+		return "", errors.New("email already registered")
+	}
+	if existing, _ := s.users.GetByUsername(ctx, username); existing != nil {
+		return "", errors.New("username already taken")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("hash password: %w", err)
+	}
+
+	otp, err := generateOTP()
+	if err != nil {
+		return "", err
+	}
+
+	sessionToken, err := generateSecureToken()
+	if err != nil {
+		return "", err
+	}
+
+	pending := pendingRegistration{
+		Email:        email,
+		PasswordHash: string(hash),
+		Username:     username,
+		OTP:          otp,
+		Attempts:     0,
+	}
+	data, _ := json.Marshal(pending)
+	if err := s.redis.Set(ctx, otpKeyPrefix+sessionToken, data, otpTTL).Err(); err != nil {
+		return "", fmt.Errorf("store pending registration: %w", err)
+	}
+
+	if err := s.sendOTPEmail(email, otp); err != nil {
+		log.Printf("WARN: failed to send OTP email to %s: %v", email, err)
+	}
+
+	return sessionToken, nil
+}
+
+// VerifyRegistrationOTP checks the OTP, creates the user account, and returns JWT tokens.
+func (s *Service) VerifyRegistrationOTP(ctx context.Context, sessionToken, otp string) (*user.User, string, string, error) {
+	key := otpKeyPrefix + sessionToken
+	data, err := s.redis.Get(ctx, key).Bytes()
+	if err != nil {
+		return nil, "", "", errors.New("code expired or invalid — please start over")
+	}
+
+	var pending pendingRegistration
+	if err := json.Unmarshal(data, &pending); err != nil {
+		return nil, "", "", errors.New("invalid session")
+	}
+
+	pending.Attempts++
+	if pending.Attempts > maxOTPAttempts {
+		s.redis.Del(ctx, key)
+		return nil, "", "", errors.New("too many incorrect attempts — please register again")
+	}
+
+	if pending.OTP != otp {
+		updated, _ := json.Marshal(pending)
+		ttl, _ := s.redis.TTL(ctx, key).Result()
+		if ttl <= 0 {
+			ttl = otpTTL
+		}
+		s.redis.Set(ctx, key, updated, ttl)
+		remaining := maxOTPAttempts - pending.Attempts
+		return nil, "", "", fmt.Errorf("incorrect code — %d attempt(s) remaining", remaining)
+	}
+
+	s.redis.Del(ctx, key)
+
+	created, err := s.users.Create(ctx, &user.User{
+		Email:        pending.Email,
+		FullName:     pending.Username,
+		Username:     pending.Username,
+		PasswordHash: &pending.PasswordHash,
+		Provider:     "email",
+	})
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	access, refresh, err := s.generateTokens(created.ID)
+	return created, access, refresh, err
+}
+
+func (s *Service) sendOTPEmail(to, otp string) error {
+	if s.smtpHost == "" {
+		log.Printf("DEV — OTP for %s: %s", to, otp)
+		return nil
+	}
+
+	from := s.smtpFrom
+	if from == "" {
+		from = s.smtpUsername
+	}
+
+	body := fmt.Sprintf(
+		"From: GrowthMind <%s>\r\nTo: %s\r\nSubject: Your verification code\r\n\r\n"+
+			"Your GrowthMind verification code is: %s\r\n\r\nThis code expires in 10 minutes.\r\n",
+		from, to, otp,
+	)
+
+	addr := s.smtpHost + ":" + s.smtpPort
+	auth := smtp.PlainAuth("", s.smtpUsername, s.smtpPassword, s.smtpHost)
+	return smtp.SendMail(addr, auth, from, []string{to}, []byte(body))
+}
+
+func generateOTP() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	n := int(b[0])<<16 | int(b[1])<<8 | int(b[2])
+	return fmt.Sprintf("%06d", n%1000000), nil
+}
+
+func generateSecureToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// ── Standard register (kept for backwards compatibility) ──────────────────────
 
 func (s *Service) Register(ctx context.Context, email, password, fullName, username string) (*user.User, string, string, error) {
 	if existing, _ := s.users.GetByEmail(ctx, email); existing != nil {
@@ -258,7 +422,6 @@ func (s *Service) AppleSignIn(ctx context.Context, identityToken, fullName strin
 	return upserted, access, refresh, err
 }
 
-// RefreshToken validates a refresh token, checks it is not revoked, and issues new tokens.
 func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
 	claims, err := s.parseRefreshToken(refreshToken)
 	if err != nil {
@@ -282,7 +445,6 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 		return "", "", errors.New("user not found")
 	}
 
-	// Revoke the old refresh token before issuing new ones.
 	if jti != "" {
 		exp, _ := claims["exp"].(float64)
 		ttl := time.Until(time.Unix(int64(exp), 0))
@@ -294,7 +456,6 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (string
 	return s.generateTokens(userID)
 }
 
-// Logout revokes the refresh token by adding its JTI to the Redis blocklist.
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	claims, err := s.parseRefreshToken(refreshToken)
 	if err != nil {

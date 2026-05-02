@@ -43,7 +43,7 @@ func main() {
 	log.Println("Redis connected")
 
 	userRepo := user.NewRepository(db)
-	authSvc := auth.NewService(userRepo, rdb, cfg.JWTSecret, cfg.JWTRefreshSecret, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI)
+	authSvc := auth.NewService(userRepo, rdb, cfg.JWTSecret, cfg.JWTRefreshSecret, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI, cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
 	authHandler := auth.NewHandler(authSvc)
 	jwt := middleware.NewJWTMiddleware(cfg.JWTSecret)
 

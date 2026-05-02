@@ -29,6 +29,53 @@ func (h *Handler) Logout(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "logged out"})
 }
 
+type registerInitiateRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
+func (h *Handler) RegisterInitiate(c *fiber.Ctx) error {
+	var req registerInitiateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.Email == "" || req.Password == "" || req.Username == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email, password and username are required"})
+	}
+
+	sessionToken, err := h.svc.InitiateRegistration(c.Context(), req.Email, req.Password, req.Username)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"session_token": sessionToken})
+}
+
+type registerVerifyRequest struct {
+	SessionToken string `json:"session_token"`
+	OTP          string `json:"otp"`
+}
+
+func (h *Handler) RegisterVerify(c *fiber.Ctx) error {
+	var req registerVerifyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if req.SessionToken == "" || req.OTP == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "session_token and otp are required"})
+	}
+
+	u, access, refresh, err := h.svc.VerifyRegistrationOTP(c.Context(), req.SessionToken, req.OTP)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"user":          u,
+		"access_token":  access,
+		"refresh_token": refresh,
+	})
+}
+
 type registerRequest struct {
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
