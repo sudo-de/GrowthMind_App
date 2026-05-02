@@ -78,6 +78,22 @@ func (s *Service) Register(ctx context.Context, email, password, fullName, usern
 	return created, access, refresh, err
 }
 
+func (s *Service) IsEmailTaken(ctx context.Context, email string) (bool, error) {
+	u, err := s.users.GetByEmail(ctx, email)
+	if err != nil {
+		return false, err
+	}
+	return u != nil, nil
+}
+
+func (s *Service) IsUsernameTaken(ctx context.Context, username string) (bool, error) {
+	u, err := s.users.GetByUsername(ctx, username)
+	if err != nil {
+		return false, err
+	}
+	return u != nil, nil
+}
+
 func (s *Service) Login(ctx context.Context, emailOrUsername, password string) (*user.User, string, string, error) {
 	var (
 		u   *user.User

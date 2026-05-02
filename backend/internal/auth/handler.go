@@ -179,6 +179,30 @@ func (h *Handler) GoogleOAuthCallback(c *fiber.Ctx) error {
 	return c.Redirect(deepLink, fiber.StatusTemporaryRedirect)
 }
 
+func (h *Handler) CheckEmail(c *fiber.Ctx) error {
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email is required"})
+	}
+	taken, err := h.svc.IsEmailTaken(c.Context(), email)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "check failed"})
+	}
+	return c.JSON(fiber.Map{"available": !taken})
+}
+
+func (h *Handler) CheckUsername(c *fiber.Ctx) error {
+	username := c.Query("username")
+	if username == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "username is required"})
+	}
+	taken, err := h.svc.IsUsernameTaken(c.Context(), username)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "check failed"})
+	}
+	return c.JSON(fiber.Map{"available": !taken})
+}
+
 func (h *Handler) Me(c *fiber.Ctx) error {
 	userID := c.Locals("userID").(string)
 	u, err := h.svc.GetMe(c.Context(), userID)

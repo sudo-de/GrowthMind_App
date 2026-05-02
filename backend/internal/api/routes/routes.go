@@ -10,6 +10,8 @@ import (
 // The version prefix (/v1, /v2, ...) is set by the caller via API_VERSION in .env.
 func Register(rg fiber.Router, authHandler *auth.Handler, jwt *middleware.JWTMiddleware) {
 	a := rg.Group("/auth")
+	a.Get("/check/email", authHandler.CheckEmail)
+	a.Get("/check/username", authHandler.CheckUsername)
 	a.Post("/register", authHandler.Register)
 	a.Post("/login", authHandler.Login)
 	a.Post("/google", authHandler.GoogleSignIn)
