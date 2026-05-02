@@ -151,6 +151,9 @@ func (s *Service) GoogleSignIn(ctx context.Context, accessToken string) (*user.U
 }
 
 func (s *Service) GoogleOAuthURL(ctx context.Context) (string, error) {
+	if s.googleClientID == "" || s.googleRedirectURI == "" {
+		return "", errors.New("google oauth not configured: missing GOOGLE_CLIENT_ID or GOOGLE_REDIRECT_URI")
+	}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
