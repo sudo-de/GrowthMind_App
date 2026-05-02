@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/smtp"
 	"net/url"
 	"strings"
 	"sync"
@@ -114,9 +113,11 @@ func (s *Service) InitiateRegistration(ctx context.Context, email, password, use
 		return "", fmt.Errorf("store pending registration: %w", err)
 	}
 
-	if err := s.sendOTPEmail(email, otp); err != nil {
-		log.Printf("WARN: failed to send OTP email to %s: %v", email, err)
-	}
+	go func() {
+		if err := s.sendOTPEmail(email, otp); err != nil {
+			log.Printf("WARN: failed to send OTP email to %s: %v", email, err)
+		}
+	}()
 
 	return sessionToken, nil
 }
@@ -175,25 +176,35 @@ func (s *Service) VerifyRegistrationOTP(ctx context.Context, sessionToken, otp s
 }
 
 func (s *Service) sendOTPEmail(to, otp string) error {
-	if s.smtpHost == "" {
+	if s.smtpFrom == "" {
+		// No email provider configured — log OTP for development
 		log.Printf("DEV — OTP for %s: %s", to, otp)
 		return nil
 	}
 
-	from := s.smtpFrom
-	if from == "" {
-		from = s.smtpUsername
-	}
-
-	body := fmt.Sprintf(
-		"From: GrowthMind <%s>\r\nTo: %s\r\nSubject: Your verification code\r\n\r\n"+
-			"Your GrowthMind verification code is: %s\r\n\r\nThis code expires in 10 minutes.\r\n",
-		from, to, otp,
+	payload := fmt.Sprintf(
+		`{"from":%q,"to":[%q],"subject":"Your GrowthMind verification code","text":"Your verification code is: %s\n\nThis code expires in 10 minutes."}`,
+		s.smtpFrom, to, otp,
 	)
 
-	addr := s.smtpHost + ":" + s.smtpPort
-	auth := smtp.PlainAuth("", s.smtpUsername, s.smtpPassword, s.smtpHost)
-	return smtp.SendMail(addr, auth, from, []string{to}, []byte(body))
+	req, err := http.NewRequest(http.MethodPost, "https://api.resend.com/emails", strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.smtpPassword) // RESEND_API_KEY stored in smtpPassword field
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("resend API error: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func generateOTP() (string, error) {
